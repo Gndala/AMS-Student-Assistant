@@ -151,17 +151,27 @@ details.cols summary{cursor:pointer;color:var(--muted);text-align:center;font-we
 .dupnote.l3{border-color:color-mix(in srgb,var(--bad) 50%,var(--line));background:color-mix(in srgb,var(--bad) 9%,transparent)}
 .dupnote.l2{border-color:color-mix(in srgb,var(--warn) 50%,var(--line));background:color-mix(in srgb,var(--warn) 9%,transparent)}
 .dupnote.l1{border-color:color-mix(in srgb,var(--info) 50%,var(--line));background:color-mix(in srgb,var(--info) 9%,transparent)}
-.dupnote button.lnk{border:0;background:transparent;text-decoration:underline;padding:0;font-weight:600}
+.dupnote .lnk{text-decoration:underline;font-weight:600}
 .sec{margin-top:22px}
 .sec h3{font-size:14px;margin:0 0 8px;color:var(--muted);font-weight:700}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px}
 .fld{display:flex;flex-direction:column;align-items:flex-start;text-align:start;border:1px solid var(--line);background:var(--panel);border-radius:11px;padding:7px 12px;min-height:58px;transition:border-color .12s,background .12s}
-.fld:hover:not(:disabled){border-color:var(--ok);background:color-mix(in srgb,var(--ok) 6%,var(--panel))}
+.fld{cursor:grab}
+.fld:hover:not(.empty){border-color:var(--ok);background:color-mix(in srgb,var(--ok) 6%,var(--panel))}
 .fld .lb{font-size:12px;color:var(--muted)}
 .fld .vl{font-weight:700;word-break:break-word}
-.fld:disabled{cursor:default;background:transparent;border-style:dashed}
-.fld:disabled .vl{color:var(--muted);font-weight:400}
+.fld.empty{cursor:default;background:transparent;border-style:dashed}
+.fld.empty .vl{color:var(--muted);font-weight:400}
 .fld.copied{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 14%,var(--panel))}
+.pick{cursor:grab}
+.dname h2{cursor:grab;width:fit-content}
+[data-drag]{-webkit-user-drag:element}
+.dragging{opacity:.45}
+.dragchip{position:fixed;top:-300px;left:-300px;background:var(--ok);color:var(--ok-ink);padding:6px 14px;border-radius:10px;font:700 15px Cairo,Tahoma,sans-serif;max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hint{margin:10px 0 0;font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.hint svg{flex:none}
+.lnk{cursor:pointer}
+td[data-drag]{cursor:grab}
 .empty-d{display:grid;place-items:center;height:100%;color:var(--muted);text-align:center;padding:30px}
 .back{display:none}
 
@@ -186,7 +196,7 @@ tr:last-child td{border-bottom:0}
 td.diff{background:color-mix(in srgb,var(--warn) 16%,transparent);font-weight:700}
 td.same{color:var(--muted)}
 .cellname{display:flex;align-items:center;gap:10px;min-width:240px}
-.cellname button.lnk{border:0;background:transparent;text-align:start;padding:0;font-weight:700;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:4px}
+.cellname .lnk{text-align:start;font-weight:700;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:4px}
 .cellname small{display:block;color:var(--muted);font-weight:400}
 .regnote{padding:8px 16px;border-top:1px solid var(--line);font-size:13.5px;background:color-mix(in srgb,var(--ok) 10%,transparent)}
 
@@ -652,7 +662,7 @@ function photoSrc(s){
 }
 function avatar(s,cls){
   const src=photoSrc(s);
-  return `<span class="av ${cls||''}">${src?`<img src="${esc(src)}" alt="" loading="lazy">`:esc((s.f.name||'؟').trim().charAt(0))}</span>`;
+  return `<span class="av ${cls||''}">${src?`<img src="${esc(src)}" alt="" loading="lazy" draggable="false">`:esc((s.f.name||'؟').trim().charAt(0))}</span>`;
 }
 
 /* ---------- قراءة الملفات ---------- */
@@ -845,7 +855,7 @@ function rowHtml(s){
   const done=S.reg.has(s.uid),g=S.dupOf.get(s.uid),u=esc(s.uid);
   return `<li class="row${done?' done':''}${S.sel===s.uid?' on':''}" data-uid="${u}">
 <button class="tick" data-act="tick" data-uid="${u}" aria-pressed="${done}" aria-label="${done?'إلغاء علامة التسجيل':'وضع علامة صح بعد التسجيل في EMIS'}: ${esc(s.full)}">${CHECK}</button>
-<button class="pick" data-act="pick" data-uid="${u}">${avatar(s)}<span class="who"><b>${esc(s.full)}</b><span class="sub">${(s.f.grade||s.f.section)?`<span>${esc(s.f.grade)} ${esc(s.f.section)}</span>`:''}${s.f.mother?`<span>الأم: ${esc(s.f.mother)}</span>`:''}</span></span></button>
+<div class="pick" role="button" tabindex="0" draggable="true" data-drag="${esc(s.full)}" title="اضغط لعرض البيانات، أو اسحب الاسم إلى EMIS" data-act="pick" data-uid="${u}">${avatar(s)}<span class="who"><b>${esc(s.full)}</b><span class="sub">${(s.f.grade||s.f.section)?`<span>${esc(s.f.grade)} ${esc(s.f.section)}</span>`:''}${s.f.mother?`<span>الأم: ${esc(s.f.mother)}</span>`:''}</span></span></div>
 <span class="tags">${g?`<span class="tag ${LV[g.level][0]}">${LV[g.level][1]}</span>`:''}${s.notes.length?'<span class="tag warn">ملاحظة</span>':''}</span></li>`;
 }
 function renderReport(){
@@ -880,7 +890,7 @@ function renderStats(){
 function sectionHtml(s){
   return SECTIONS.map(([t,keys])=>`<div class="sec"><h3>${t}</h3><div class="grid">${keys.map(k=>{
     const v=s.f[k]||'';
-    return `<button class="fld" data-act="copy" data-k="${k}" ${v?'':'disabled'} title="${v?'اضغط للنسخ':'فارغ'}"><span class="lb">${LABEL[k]}</span><span class="vl${LTR_KEYS.has(k)&&v?' ltr':''}">${v?esc(v):'—'}</span></button>`}).join('')}</div></div>`).join('');
+    return `<div class="fld${v?'':' empty'}" role="button" tabindex="${v?0:-1}" aria-disabled="${!v}" ${v?`draggable="true" data-drag="${esc(v)}" data-act="copy" data-k="${k}"`:''} title="${v?'اسحبه إلى EMIS أو اضغط لنسخه':'فارغ'}"><span class="lb">${LABEL[k]}</span><span class="vl${LTR_KEYS.has(k)&&v?' ltr':''}">${v?esc(v):'—'}</span></div>`}).join('')}</div></div>`).join('');
 }
 function renderDetail(){
   const el=$('#detail'),s=S.byUid.get(S.sel);
@@ -891,15 +901,16 @@ function renderDetail(){
 <div class="dhead">
  <div class="photo-drop" data-uid="${esc(s.uid)}"><div class="av lg">${src?`<img src="${esc(src)}" alt="صورة ${esc(s.full)}">`:esc((s.f.name||'؟').charAt(0))}</div>
   <small>${src?`<a href="${esc(src)}" download="${esc(s.full)}.jpg">حفظ الصورة</a> أو اسحب صورة جديدة`:'اسحب صورة الطالب وأفلتها هنا'}</small></div>
- <div class="dname"><h2>${esc(s.full)}</h2>
+ <div class="dname"><h2 draggable="true" data-drag="${esc(s.full)}" title="اسحب الاسم الكامل">${esc(s.full)}</h2>
   <div class="meta">${s.f.grade||s.f.section?`<span>${esc(s.f.grade)} ${esc(s.f.section)}</span>`:''}${s.f.mother?`<span>الأم: ${esc(s.f.mother)}</span>`:''}<span>صف <span class="num">${s.row}</span> في الملف</span></div>
   <div class="dact">
    <button class="tick big" id="dTick" data-act="tickd" aria-pressed="${done}">${CHECK}<span>${done?'مسجَّل في EMIS':'تم تسجيله في EMIS'}</span></button>
    <button class="btn sm" data-act="prev">السابق</button><button class="btn sm" data-act="next">التالي</button>
-   <button class="btn sm" data-act="copyName">نسخ الاسم الكامل</button><button class="btn sm" data-act="copyAll">نسخ كل الحقول</button>
+   <button class="btn sm" data-act="copyName">نسخ الاسم الكامل</button><button class="btn sm" data-act="copyAll">نسخ كل الحقول</button><span class="btn sm" draggable="true" data-drag="${esc(allFieldsText(s))}" title="اسحبها إلى خانة نص كبيرة">اسحب كل الحقول</span>
    <label class="auto"><input type="checkbox" id="autoNext" ${S.auto?'checked':''}> الانتقال للتالي بعد التسجيل</label>
-  </div></div></div>
-${g?`<div class="dupnote l${g.level}"><b>${{3:'تكرار مؤكد محتمل',2:'اسم متشابه',1:'اسم قريب'}[g.level]}:</b> ${esc(g.reasons[0]||'')}<ul>${others.map(o=>`<li><button class="lnk" data-act="openStudent" data-uid="${esc(o.uid)}">${esc(o.full)}</button> — تولد <span class="ltr">${esc(o.f.birth||'—')}</span>، الأم: ${esc(o.f.mother||'—')}${S.reg.has(o.uid)?' <span class="tag ok">مسجَّل</span>':''}</li>`).join('')}</ul> <button class="lnk" data-act="gotoGroup" data-gid="${g.id}">فتح في كشف المكرر</button></div>`:''}
+  </div>
+  <p class="hint"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18M8 7l4-4 4 4M8 17l4 4 4-4M7 8l-4 4 4 4M17 8l4 4-4 4"/></svg>أمسك أي حقل أو الاسم بالمؤشر واسحبه وأفلته في خانة EMIS، أو اضغط عليه لنسخه.</p></div></div></div>
+${g?`<div class="dupnote l${g.level}"><b>${{3:'تكرار مؤكد محتمل',2:'اسم متشابه',1:'اسم قريب'}[g.level]}:</b> ${esc(g.reasons[0]||'')}<ul>${others.map(o=>`<li><span class="lnk" role="button" tabindex="0" data-act="openStudent" data-uid="${esc(o.uid)}">${esc(o.full)}</span> — تولد <span class="ltr">${esc(o.f.birth||'—')}</span>، الأم: ${esc(o.f.mother||'—')}${S.reg.has(o.uid)?' <span class="tag ok">مسجَّل</span>':''}</li>`).join('')}</ul> <span class="lnk" role="button" tabindex="0" data-act="gotoGroup" data-gid="${g.id}">فتح في كشف المكرر</span></div>`:''}
 ${s.notes.length?`<div class="notes"><b>ملاحظات على البيانات:</b><ul>${s.notes.map(n=>`<li>${esc(n)}</li>`).join('')}</ul></div>`:''}
 ${sectionHtml(s)}`;
 }
@@ -919,8 +930,8 @@ function groupHtml(g){
 ${gone?`<button class="btn sm" data-act="undoGone" data-gid="${g.id}">إرجاع للكشف</button>`:`<button class="btn sm" data-act="notDup" data-gid="${g.id}" title="تجاهل هذه المجموعة لأنها أسماء متشابهة فقط">ليسوا مكرراً</button>`}</header>
 <div class="twrap"><table><thead><tr><th>صح</th><th>الاسم الكامل</th>${cols.map(c=>`<th>${c.l}</th>`).join('')}</tr></thead><tbody>
 ${g.members.map(m=>`<tr><td><button class="tick" data-act="tick" data-uid="${esc(m.uid)}" aria-pressed="${S.reg.has(m.uid)}" aria-label="علامة صح: ${esc(m.full)}">${CHECK}</button></td>
-<td><div class="cellname">${avatar(m,'xs')}<div><button class="lnk" data-act="openStudent" data-uid="${esc(m.uid)}">${esc(m.full)}</button><small>صف <span class="num">${m.row}</span> في الملف</small></div></div></td>
-${cols.map(c=>`<td class="${c.diff?'diff':'same'}">${m.f[c.k]?(LTR_KEYS.has(c.k)?`<span class="ltr">${esc(m.f[c.k])}</span>`:esc(m.f[c.k])):'—'}</td>`).join('')}</tr>`).join('')}
+<td><div class="cellname" draggable="true" data-drag="${esc(m.full)}" title="اسحب الاسم">${avatar(m,'xs')}<div><span class="lnk" role="button" tabindex="0" data-act="openStudent" data-uid="${esc(m.uid)}">${esc(m.full)}</span><small>صف <span class="num">${m.row}</span> في الملف</small></div></div></td>
+${cols.map(c=>`<td class="${c.diff?'diff':'same'}"${m.f[c.k]?` draggable="true" data-drag="${esc(m.f[c.k])}"`:''}>${m.f[c.k]?(LTR_KEYS.has(c.k)?`<span class="ltr">${esc(m.f[c.k])}</span>`:esc(m.f[c.k])):'—'}</td>`).join('')}</tr>`).join('')}
 </tbody></table></div>
 ${regd.length?`<div class="regnote">مسجَّل في EMIS من هذه المجموعة: <b>${esc(regd.map(m=>m.full).join('، '))}</b></div>`:''}</article>`;
 }
@@ -1164,6 +1175,23 @@ document.addEventListener('click',async e=>{
     case 'notDup':{const g=S.groups.find(x=>x.id===b.dataset.gid);if(g){S.dismissed.add(g.sig);rebuildDup();saveReg();renderStats();renderDups();toast('تم استبعاد المجموعة من الكشف')}break}
     case 'undoGone':{const g=S.groups.find(x=>x.id===b.dataset.gid);if(g){S.dismissed.delete(g.sig);rebuildDup();saveReg();renderStats();renderDups()}break}
   }
+});
+/* سحب أي معلومة إلى خارج الصفحة (إلى خانات EMIS مثلاً) */
+document.addEventListener('dragstart',e=>{
+  const el=e.target.closest&&e.target.closest('[data-drag]');
+  if(!el){return}
+  const v=el.dataset.drag;
+  e.dataTransfer.setData('text/plain',v);
+  e.dataTransfer.effectAllowed='copy';
+  const chip=document.createElement('div');chip.className='dragchip';chip.textContent=v.split('\n')[0];
+  document.body.appendChild(chip);
+  try{e.dataTransfer.setDragImage(chip,12,12)}catch(x){}
+  setTimeout(()=>chip.remove(),0);
+  el.classList.add('dragging');
+  el.addEventListener('dragend',()=>el.classList.remove('dragging'),{once:true});
+});
+document.addEventListener('keydown',e=>{
+  if((e.key==='Enter'||e.key===' ')&&e.target.matches&&e.target.matches('[role=button][data-act]')){e.preventDefault();e.target.click()}
 });
 document.addEventListener('keydown',e=>{
   if(S.view!=='students'||!S.students.length)return;
