@@ -719,38 +719,102 @@ async function unzip(buf){
   }};
 }
 async function xlsxImages(buf,sheetName){
-  const out=new Map();
+  const out=new Map(),stats={anchor:0,dispimg:0,rich:0};
+  const add=(row,col,blob)=>{const a=out.get(row)||[];a.push({col,blob});out.set(row,a)};
   const z=await unzip(buf);
   const txt=async n=>{const d=await z.read(n);return d?new TextDecoder().decode(d):null};
   const xml=s=>new DOMParser().parseFromString(s,'application/xml');
-  const all=(doc,ln)=>[...doc.getElementsByTagName('*')].filter(e=>e.localName===ln);
-  const attr=(el,ln)=>{for(const a of el.attributes)if(a.localName===ln)return a.value;return null};
-  const wbx=await txt('xl/workbook.xml'),wrels=await txt('xl/_rels/workbook.xml.rels');
-  if(!wbx||!wrels)return out;
-  const sh=all(xml(wbx),'sheet').find(e=>e.getAttribute('name')===sheetName);if(!sh)return out;
-  const rel=all(xml(wrels),'Relationship').find(e=>e.getAttribute('Id')===attr(sh,'id'));if(!rel)return out;
-  const sheetPath=resolvePath('xl/workbook.xml',rel.getAttribute('Target'));
-  const srels=await txt(sheetPath.replace(/([^\/]+)$/,'_rels/$1.rels'));if(!srels)return out;
-  const drel=all(xml(srels),'Relationship').find(e=>/\/drawing$/.test(e.getAttribute('Type')||''));if(!drel)return out;
-  const drawPath=resolvePath(sheetPath,drel.getAttribute('Target'));
-  const dxml=await txt(drawPath),drels=await txt(drawPath.replace(/([^\/]+)$/,'_rels/$1.rels'));
-  if(!dxml||!drels)return out;
-  const rmap=new Map(all(xml(drels),'Relationship').map(e=>[e.getAttribute('Id'),e.getAttribute('Target')]));
+  const all=(doc,ln)=>[...doc.getElementsByTagName('*')].filter(e=>ln==='*'||e.localName===ln);
+  const attr=(el,ln)=>{if(!el)return null;for(const a of el.attributes)if(a.localName===ln)return a.value;return null};
+  const relsFile=f=>f.replace(/([^\/]+)$/,'_rels/$1.rels');
+  const relMap=async f=>{const t=await txt(relsFile(f));return t?new Map(all(xml(t),'Relationship').map(e=>[e.getAttribute('Id'),e.getAttribute('Target')])):new Map()};
   const MIME={png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',bmp:'image/bmp',webp:'image/webp'};
   const cache=new Map();
-  for(const a of all(xml(dxml),'*').filter(e=>e.localName==='twoCellAnchor'||e.localName==='oneCellAnchor')){
-    const from=[...a.children].find(c=>c.localName==='from');
-    const blip=all(a,'blip')[0];if(!from||!blip)continue;
-    const row=+[...from.children].find(c=>c.localName==='row').textContent;
-    const col=+[...from.children].find(c=>c.localName==='col').textContent;
-    const tg=rmap.get(attr(blip,'embed'));if(!tg)continue;
-    const path=resolvePath(drawPath,tg),ext=path.split('.').pop().toLowerCase();
-    if(!MIME[ext])continue;
-    let blob=cache.get(path);
-    if(!blob){const d=await z.read(path);if(!d)continue;blob=new Blob([d],{type:MIME[ext]});cache.set(path,blob)}
-    const arr=out.get(row)||[];arr.push({col,blob});out.set(row,arr);
-  }
-  return out;
+  const media=async path=>{
+    const ext=path.split('.').pop().toLowerCase();if(!MIME[ext])return null;
+    let b=cache.get(path);
+    if(!b){const d=await z.read(path);if(!d)return null;b=new Blob([d],{type:MIME[ext]});cache.set(path,b)}
+    return b;
+  };
+  const colIdx=s=>[...s].reduce((n,c)=>n*26+c.charCodeAt(0)-64,0)-1;
+  const wbx=await txt('xl/workbook.xml'),wrels=await txt('xl/_rels/workbook.xml.rels');
+  if(!wbx||!wrels)return {out,stats};
+  const sh=all(xml(wbx),'sheet').find(e=>e.getAttribute('name')===sheetName);if(!sh)return {out,stats};
+  const rel=all(xml(wrels),'Relationship').find(e=>e.getAttribute('Id')===attr(sh,'id'));if(!rel)return {out,stats};
+  const sheetPath=resolvePath('xl/workbook.xml',rel.getAttribute('Target'));
+
+  /* 1) صور عائمة فوق الخلايا (الطريقة المعتادة في Excel) */
+  try{
+    const srels=await txt(relsFile(sheetPath));
+    const drel=srels&&all(xml(srels),'Relationship').find(e=>/\/drawing$/.test(e.getAttribute('Type')||''));
+    if(drel){
+      const drawPath=resolvePath(sheetPath,drel.getAttribute('Target'));
+      const dxml=await txt(drawPath),rmap=await relMap(drawPath);
+      if(dxml){
+        for(const a of all(xml(dxml),'*').filter(e=>e.localName==='twoCellAnchor'||e.localName==='oneCellAnchor')){
+          const from=[...a.children].find(c=>c.localName==='from'),blip=all(a,'blip')[0];
+          if(!from||!blip)continue;
+          const row=+[...from.children].find(c=>c.localName==='row').textContent;
+          const col=+[...from.children].find(c=>c.localName==='col').textContent;
+          const tg=rmap.get(attr(blip,'embed'));if(!tg)continue;
+          const blob=await media(resolvePath(drawPath,tg));if(!blob)continue;
+          add(row,col,blob);stats.anchor++;
+        }
+      }
+    }
+  }catch(e){}
+
+  /* 2) و 3) صور داخل الخلية: DISPIMG (WPS) و «وضع في الخلية» (Excel الجديد) */
+  try{
+    const sx=await txt(sheetPath);
+    if(sx&&(/DISPIMG/.test(sx)||/\bvm="/.test(sx))){
+      const cells=all(xml(sx),'c');
+      /* WPS */
+      const ci=await txt('xl/cellimages.xml');
+      if(ci&&/DISPIMG/.test(sx)){
+        const crel=await relMap('xl/cellimages.xml'),idMap=new Map();
+        for(const p of all(xml(ci),'pic')){
+          const nm=all(p,'cNvPr')[0],bl=all(p,'blip')[0];
+          const tg=bl&&crel.get(attr(bl,'embed'));
+          if(nm&&tg){const b=await media(resolvePath('xl/cellimages.xml',tg));if(b)idMap.set(nm.getAttribute('name'),b)}
+        }
+        for(const c of cells){
+          const f=[...c.children].find(x=>x.localName==='f');if(!f)continue;
+          const m=f.textContent.match(/DISPIMG\(\s*"([^"]+)"/);if(!m)continue;
+          const b=idMap.get(m[1]);if(!b)continue;
+          const r=c.getAttribute('r').match(/^([A-Z]+)(\d+)$/);
+          add(+r[2]-1,colIdx(r[1]),b);stats.dispimg++;
+        }
+      }
+      /* Excel: place in cell */
+      const vmCells=cells.filter(c=>c.hasAttribute('vm'));
+      if(vmCells.length){
+        const meta=await txt('xl/metadata.xml'),rvx=await txt('xl/richData/rdrichvalue.xml'),
+              rvs=await txt('xl/richData/rdrichvaluestructure.xml'),rrx=await txt('xl/richData/richValueRel.xml');
+        if(meta&&rvx&&rvs&&rrx){
+          const rrels=await relMap('xl/richData/richValueRel.xml');
+          const md=xml(meta);
+          const vmd=all(md,'valueMetadata')[0],fut=all(md,'futureMetadata').find(e=>e.getAttribute('name')==='XLRICHVALUE');
+          const vbks=vmd?[...vmd.children]:[],fbks=fut?[...fut.children].filter(e=>e.localName==='bk'):[];
+          const rvList=all(xml(rvx),'rv'),sList=all(xml(rvs),'s'),relList=all(xml(rrx),'rel');
+          for(const c of vmCells){
+            const bk=vbks[+c.getAttribute('vm')-1];const rc=bk&&[...bk.children].find(x=>x.localName==='rc');if(!rc)continue;
+            const fb=fbks[+rc.getAttribute('v')];const rvb=fb&&all(fb,'rvb')[0];if(!rvb)continue;
+            const rv=rvList[+rvb.getAttribute('i')];if(!rv)continue;
+            const st=sList[+rv.getAttribute('s')];if(!st)continue;
+            const ki=[...st.children].findIndex(k=>k.getAttribute('n')==='_rvRel:LocalImageIdentifier');if(ki<0)continue;
+            const vs=[...rv.children].filter(x=>x.localName==='v');
+            const rl=relList[+vs[ki].textContent];if(!rl)continue;
+            const tg=rrels.get(attr(rl,'id'));if(!tg)continue;
+            const b=await media(resolvePath('xl/richData/richValueRel.xml',tg));if(!b)continue;
+            const r=c.getAttribute('r').match(/^([A-Z]+)(\d+)$/);
+            add(+r[2]-1,colIdx(r[1]),b);stats.rich++;
+          }
+        }
+      }
+    }
+  }catch(e){}
+  return {out,stats};
 }
 
 /* ---------- الاستيراد ---------- */
@@ -786,18 +850,19 @@ async function importSpreadsheet(file,mode){
   }
   if(!list.length)throw new Error('لم أجد صفوف طلاب تحت العناوين.');
   list.forEach(prep);assignUids(list);
-  let photos=0;
+  let photos=0,imgInfo=null;
   if(buf&&['xlsx','xlsm'].includes(ext)){
     try{
-      const imgs=await xlsxImages(buf,sh.name);
+      const {out:imgs,stats}=await xlsxImages(buf,sh.name);
+      imgInfo=stats;
       for(const st of list){
         const arr=imgs.get(st._idx);if(!arr)continue;
         const pick=(map.photo!==undefined&&arr.find(a=>a.col===map.photo))||arr[0];
         await setPhoto(st.uid,pick.blob);photos++;
       }
-    }catch(e){/* الصور المدمجة اختيارية */}
+    }catch(e){imgInfo={error:true}}
   }
-  return {list,rep:{file:file.name,sheet:sh.name,count:list.length,missing:miss2,unknown,blank,noname,photos,mapped:FIELDS.length-miss2.length}};
+  return {list,rep:{file:file.name,sheet:sh.name,count:list.length,missing:miss2,unknown,blank,noname,photos,imgInfo,ext,mapped:FIELDS.length-miss2.length}};
 }
 function applyImport(list,rep,mode){
   let added=list.length,skipped=0;
@@ -858,6 +923,15 @@ function rowHtml(s){
 <div class="pick" role="button" tabindex="0" draggable="true" data-drag="${esc(s.full)}" title="اضغط لعرض البيانات، أو اسحب الاسم إلى EMIS" data-act="pick" data-uid="${u}">${avatar(s)}<span class="who"><b>${esc(s.full)}</b><span class="sub">${(s.f.grade||s.f.section)?`<span>${esc(s.f.grade)} ${esc(s.f.section)}</span>`:''}${s.f.mother?`<span>الأم: ${esc(s.f.mother)}</span>`:''}</span></span></div>
 <span class="tags">${g?`<span class="tag ${LV[g.level][0]}">${LV[g.level][1]}</span>`:''}${s.notes.length?'<span class="tag warn">ملاحظة</span>':''}</span></li>`;
 }
+function photoReport(r){
+  const i=r.imgInfo;
+  if(r.ext==='xls')return '<p>ملف xls القديم لا يحتفظ بالصور بشكل أقرأه. احفظه بصيغة xlsx أو اسحب الصور كملفات منفصلة.</p>';
+  if(!i)return r.photos?`<p>صور مرتبطة: <span class="num">${fmtN(r.photos)}</span></p>`:'';
+  if(i.error)return '<p>تعذّرت قراءة الصور المدمجة في الملف. اسحب الصور كملفات منفصلة.</p>';
+  const found=i.anchor+i.dispimg+i.rich;
+  if(!found)return '<p>لم أجد صوراً داخل الملف. اسحب الصور كملفات منفصلة وسأطابقها بأسمائها.</p>';
+  return `<p>صور وجدتها داخل Excel: <em class="num">${fmtN(found)}</em>، وربطتها بالطلاب: <em class="num">${fmtN(r.photos)}</em>.</p>`;
+}
 function renderReport(){
   const r=S.report;if(!r){$('#report').innerHTML='';return}
   const bad=r.missing.length>0;
@@ -867,7 +941,7 @@ ${r.missing.length?`<p>أعمدة غير موجودة: ${esc(r.missing.join('، 
 ${r.unknown&&r.unknown.length?`<p>أعمدة لم أستخدمها: ${esc(r.unknown.join('، '))}</p>`:''}
 ${r.blank||r.noname?`<p>تم تخطي <span class="num">${fmtN(r.blank)}</span> صفاً فارغاً و<span class="num">${fmtN(r.noname)}</span> صفاً بلا اسم.</p>`:''}
 ${r.skipped?`<p>تخطيت <span class="num">${fmtN(r.skipped)}</span> صفاً موجوداً مسبقاً.</p>`:''}
-${r.photos?`<p>صور مستخرجة من داخل Excel: <span class="num">${fmtN(r.photos)}</span></p>`:''}</div></details>`;
+${photoReport(r)}</div></details>`;
 }
 function renderList(){
   const list=getFiltered();S.cur=list;
@@ -1068,7 +1142,7 @@ async function handleFiles(files,opt={}){
       S.view='students';S.filter='all';S.q='';$('#q').value='';S.shown=150;
       render();
       const open=S.groups.filter(g=>!S.dismissed.has(g.sig)).length;
-      toast(`تم استيراد ${fmtN(added)} طالب. ملاحظات: ${fmtN(S.students.filter(s=>s.notes.length).length)}، مجموعات للمراجعة: ${fmtN(open)}`);
+      toast(`تم استيراد ${fmtN(added)} طالب${res.rep.photos?`، وصور: ${fmtN(res.rep.photos)}`:''}. ملاحظات: ${fmtN(S.students.filter(s=>s.notes.length).length)}، مجموعات للمراجعة: ${fmtN(open)}`);
       if(!DB.ok&&!S.warnedDb){S.warnedDb=1;setTimeout(()=>toast('الحفظ التلقائي غير متاح هنا. استخدم «حفظ التقدم» حتى لا تضيع علامات الصح'),2800)}
     }
     if(imgs.length){
